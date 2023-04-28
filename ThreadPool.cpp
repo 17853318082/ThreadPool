@@ -25,7 +25,7 @@ public:
     //     fun(fd,events,arg);
     // }
     void run(){
-        this_thread::sleep_for(1s);
+        this_thread::sleep_for(10s);
         cout<<"线程："<<this_thread::get_id()<<"  任务:"<<n<<"执行"<<endl;
     }
 private:
@@ -44,6 +44,8 @@ class ThreadPool
 public:
     ThreadPool();
     ThreadPool(int num);
+    ThreadPool(int num,int max_thread_num);
+    ThreadPool(int num,int max_thread_num,int add_num);
     void ThreadWork();         // 线程工作
     void AddTask(Task task);   // 向线程池添加任务
     void ManageWorker();       // 管理线程工作方法
@@ -64,13 +66,40 @@ private:
     std::thread manage_tid;            // 管理者线程id
     int busy_thread_num;               // 记录繁忙线程数量，即现在正在执行任务的线程数量
     
-    int add_num = 5;                   // 每次增加线程的数量，暂定为5
+    int add_num;                   // 每次增加线程的数量，暂定为5
 };
 
 /*初始化线程池，输入参数核心线程数：thread_num*/
 ThreadPool::ThreadPool(int num) : thread_num(num),is_exit(false)
 {
     max_thread_num = 200;   // 最大线程数量暂定为200
+    busy_thread_num = 0;    // 繁忙线程初始为0
+    add_num = 5;
+    // 构造函数创建num个线程
+    for (int i = 0; i < thread_num; i++)
+    {
+        workers.emplace_back(&ThreadPool::ThreadWork, this); // 将线程加入工作队列，线程全部都执行ThreadWork方法
+    }
+    // 开启管理者线程
+    manage_tid = std::thread(&ThreadPool::ManageWorker,this);
+}
+/*初始化线程池，输入两个参数，核心线程数与最大线程数*/
+ThreadPool::ThreadPool(int num,int max_thread_num) : thread_num(num),max_thread_num(max_thread_num),is_exit(false)
+{
+    busy_thread_num = 0;    // 繁忙线程初始为0
+    add_num = 5;
+    // 构造函数创建num个线程
+    for (int i = 0; i < thread_num; i++)
+    {
+        workers.emplace_back(&ThreadPool::ThreadWork, this); // 将线程加入工作队列，线程全部都执行ThreadWork方法
+    }
+    // 开启管理者线程
+    manage_tid = std::thread(&ThreadPool::ManageWorker,this);
+}
+/*初始化线程池：输入三个参数：核心线程数，最大线程数和每次线程增加与减少的数量*/
+ThreadPool::ThreadPool(int num,int max_thread_num,int add_num) 
+                      : thread_num(num),max_thread_num(max_thread_num),add_num(add_num),is_exit(false)
+{
     busy_thread_num = 0;    // 繁忙线程初始为0
     // 构造函数创建num个线程
     for (int i = 0; i < thread_num; i++)
@@ -80,6 +109,8 @@ ThreadPool::ThreadPool(int num) : thread_num(num),is_exit(false)
     // 开启管理者线程
     manage_tid = std::thread(&ThreadPool::ManageWorker,this);
 }
+
+
 /*管理者线程,用于管理线程，调节线程的数量*/
 void ThreadPool::ManageWorker()
 {
@@ -106,7 +137,7 @@ void ThreadPool::ManageWorker()
         }
         // 任务队列中没有任务，且繁忙线程的数量小于最小的线程数量时，减少线程数量
         if(tasks.size()==0&&workers.size()>thread_num&&busy_thread_num<thread_num){
-            cout<<"还有"<<workers.size()-thread_num<<"多余线程正在执行"<<endl;
+            cout<<"还有"<<workers.size()-thread_num<<"多余线程存活"<<endl;
             int reduce = 0;
             // 每次减少的数量与添加的数量相同,空的时候每次最多唤醒5个线程进行销毁
             while(reduce<add_num&&workers.size()>thread_num){
@@ -123,6 +154,7 @@ void ThreadPool::ThreadWork()
     // 线程任务方法,退出时自动退出
     while (!is_exit)
     {
+        cout<<tasks.size()<<endl;
         // 添加线程销毁的,只有任务队列为空时才进入线程销毁模式
         if(tasks.empty()){
             {
@@ -130,7 +162,7 @@ void ThreadPool::ThreadWork()
                 // 当任务队列为空，并且有空余线程数大于核心线程数的时候，并且繁忙的线程数小于最小线程数的时候，说明有多余未参与工作的线程，进入释放线程
                 this->condition.wait(lock,[this]
                                 {return (this->tasks.empty()&&this->workers.size()>this->thread_num     // 三个条件都为true的时候才会加锁，向下执行
-                                &&busy_thread_num<thread_num)||is_exit;});      // 当线程池退出时，释放所有线程
+                                &&busy_thread_num<thread_num)||is_exit||;});      // 当线程池退出时，释放所有线程
                 // 从线程队列中移除当前线程
                 auto current_thread_id = this_thread::get_id();
                 cout<<"准备移除："<<current_thread_id<<endl;
@@ -187,6 +219,7 @@ void ThreadPool::AddTask(Task task){
         // 任务入列
         tasks.emplace(task);
     }
+    cout<<"唤醒线程"<<tasks.size()<<endl;
     condition.notify_one(); // 唤醒一个线程执行任务
 }
 /*设置退出线程池*/
@@ -208,11 +241,14 @@ ThreadPool::~ThreadPool(){
     }
 }
 
+/*测试函数*/
 int main(){
     // 创建一个线程池，线程数为5
-    ThreadPool tp(10);
+    ThreadPool tp(10);     // 仅设置核心线程数
+    // ThreadPool tp(5,20);      // 设置线程上限
+    // ThreadPool tp(5,100,20);  // 设置上限+每次递增递减线程数
     // 向线程池添加任务
-    for(int i=0;i<1000;i++){
+    for(int i=0;i<10;i++){
         Task task(i+1);
         tp.AddTask(task);
     }
