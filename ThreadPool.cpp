@@ -1,5 +1,5 @@
 /*
-静态线程池，用于配合epoll反应堆完成高并发
+动态线线程池，用于配合epoll反应堆完成高并发
 */
 #include <vector>
 #include <queue>
@@ -242,7 +242,7 @@ ThreadPool::~ThreadPool(){
 /*测试函数*/
 int main(){
     // 创建一个线程池，线程数为5
-    ThreadPool tp(10);     // 仅设置核心线程数
+    ThreadPool tp(10,100,0);     // 仅设置核心线程数
     // ThreadPool tp(5,20);      // 设置线程上限
     // ThreadPool tp(5,100,20);  // 设置上限+每次递增递减线程数
     // 向线程池添加任务
