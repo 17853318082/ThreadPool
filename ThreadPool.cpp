@@ -136,7 +136,7 @@ void ThreadPool::ManageWorker()
             }
         }
         // 任务队列中没有任务，且繁忙线程的数量小于最小的线程数量时，减少线程数量
-        if(tasks.size()==0&&workers.size()>thread_num&&busy_thread_num<thread_num){
+        if(tasks.empty()&&workers.size()>thread_num&&busy_thread_num<thread_num){
             cout<<"还有"<<workers.size()-thread_num<<"多余线程存活"<<endl;
             int reduce = 0;
             // 每次减少的数量与添加的数量相同,空的时候每次最多唤醒5个线程进行销毁
@@ -154,12 +154,11 @@ void ThreadPool::ThreadWork()
     // 线程任务方法,退出时自动退出
     while (!is_exit)
     {
-        // 添加线程销毁的,只有任务队列为空时才进入线程销毁模式
         Task task;
         {
             // 创建唯一锁对象，这个锁是用来锁住任务队列
             std::unique_lock<std::mutex> lock(this->queue_mutex);
-            // 条件阻塞，当任务队列非空，或者是线程池销毁时加锁
+            // 条件阻塞，当任务队列非空，或者是线程池销毁时加锁，满足三个条件时唤醒加锁，退出时，有任务时，该线程被清理时
             this->condition.wait(lock, [this]    
                                 { return this->is_exit || !this->tasks.empty()||
                                 this->tasks.empty()&&this->workers.size()>this->thread_num    
@@ -190,7 +189,7 @@ void ThreadPool::ThreadWork()
             {
                 return;
             }
-            // 创建一个任务对象，接收任务并处理
+            // 当任务队列不为空时，创建一个任务对象，接收任务并处理
             task = std::move(this->tasks.front());
             // 任务出队列
             this->tasks.pop();
