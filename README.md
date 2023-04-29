@@ -8,6 +8,6 @@
 # 构建与运行
 1. 创建 build 文件夹
 2. cd build     
-3. ../cmake
+3. cmake ../
 4. make
 5. ./ThreadPool
