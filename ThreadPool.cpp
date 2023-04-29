@@ -25,7 +25,7 @@ public:
     //     fun(fd,events,arg);
     // }
     void run(){
-        this_thread::sleep_for(10s);
+        this_thread::sleep_for(1s);
         cout<<"线程："<<this_thread::get_id()<<"  任务:"<<n<<"执行"<<endl;
     }
 private:
@@ -154,58 +154,58 @@ void ThreadPool::ThreadWork()
     // 线程任务方法,退出时自动退出
     while (!is_exit)
     {
-        cout<<tasks.size()<<endl;
         // 添加线程销毁的,只有任务队列为空时才进入线程销毁模式
-        if(tasks.empty()){
+        Task task;
+        {
+            // 创建唯一锁对象，这个锁是用来锁住任务队列
+            std::unique_lock<std::mutex> lock(this->queue_mutex);
+            // 条件阻塞，当任务队列非空，或者是线程池销毁时加锁
+            this->condition.wait(lock, [this]    
+                                { return this->is_exit || !this->tasks.empty()||
+                                this->tasks.empty()&&this->workers.size()>this->thread_num    
+                                &&busy_thread_num<thread_num; });
+            // 清除线程池多余线程
+            if(tasks.empty()&&this->workers.size()>this->thread_num&&busy_thread_num<thread_num)
             {
-                unique_lock<mutex> lock(thread_queue_mutex);
-                // 当任务队列为空，并且有空余线程数大于核心线程数的时候，并且繁忙的线程数小于最小线程数的时候，说明有多余未参与工作的线程，进入释放线程
-                this->condition.wait(lock,[this]
-                                {return (this->tasks.empty()&&this->workers.size()>this->thread_num     // 三个条件都为true的时候才会加锁，向下执行
-                                &&busy_thread_num<thread_num)||is_exit||;});      // 当线程池退出时，释放所有线程
-                // 从线程队列中移除当前线程
-                auto current_thread_id = this_thread::get_id();
-                cout<<"准备移除："<<current_thread_id<<endl;
-                for(auto it=workers.begin();it!=workers.end();it++){
-                    if(it->get_id()==current_thread_id){
-                        it->detach();           // 从主线程分离，准备退出线程，由系统进行回收
-                        workers.erase(it);
-                        cout<<"线程："<<std::this_thread::get_id()<<" 已移除"<<endl;
-                        break;
+                {   
+                    thread_queue_mutex.lock();  // 锁住线程队列，清除队列中的多余线程
+                    // 当任务队列为空，并且有空余线程数大于核心线程数的时候，并且繁忙的线程数小于最小线程数的时候，说明有多余未参与工作的线程，进入释放线程
+                    // 从线程队列中移除当前线程
+                    auto current_thread_id = this_thread::get_id();
+                    cout<<"准备移除："<<current_thread_id<<endl;
+                    for(auto it=workers.begin();it!=workers.end();it++){
+                        if(it->get_id()==current_thread_id){
+                            it->detach();           // 从主线程分离，准备退出线程，由系统进行回收
+                            workers.erase(it);
+                            cout<<"线程："<<std::this_thread::get_id()<<" 已移除"<<endl;
+                            break;
+                        }
                     }
+                    thread_queue_mutex.unlock();   // 解锁
                 }
+                return;      // 执行return，退出该线程并释放线程资源
             }
-            return;      // 执行return，退出该线程并释放线程资源
-        }else{
-            Task task;
+            // 如果是线程池销毁条件，则退出该线程
+            if (this->is_exit && this->tasks.empty())
             {
-                // 创建唯一锁对象
-                std::unique_lock<std::mutex> lock(this->queue_mutex);
-                // 条件阻塞，当任务队列非空，或者是线程池销毁时加锁
-                this->condition.wait(lock, [this]    
-                                    { return this->is_exit || !this->tasks.empty(); });
-                // 如果是线程池销毁条件，则退出该线程
-                if (this->is_exit && this->tasks.empty())
-                {
-                    return;
-                }
-                // 创建一个任务对象，接收任务并处理
-                task = std::move(this->tasks.front());
-                // 任务出队列
-                this->tasks.pop();
+                return;
             }
-            // 在执行任务之前，增加线程繁忙线程的数量
-            thread_busy_mutex.lock();
-            busy_thread_num++;
-            thread_busy_mutex.unlock();
-            // 执行任务
-            task.run();
-            // 执行任务之后，将繁忙线程减一，此线程标记为不繁忙
-            thread_busy_mutex.lock();
-            busy_thread_num--;
-            thread_busy_mutex.unlock();
-            // 到此，该线程任务执行完毕，进入空闲状态
+            // 创建一个任务对象，接收任务并处理
+            task = std::move(this->tasks.front());
+            // 任务出队列
+            this->tasks.pop();
         }
+        // 在执行任务之前，增加线程繁忙线程的数量
+        thread_busy_mutex.lock();
+        busy_thread_num++;
+        thread_busy_mutex.unlock();
+        // 执行任务
+        task.run();
+        // 执行任务之后，将繁忙线程减一，此线程标记为不繁忙
+        thread_busy_mutex.lock();
+        busy_thread_num--;
+        thread_busy_mutex.unlock();
+        // 到此，该线程任务执行完毕，进入空闲状态
     }
 }
 // 函数指针的形式导入任务
@@ -219,7 +219,6 @@ void ThreadPool::AddTask(Task task){
         // 任务入列
         tasks.emplace(task);
     }
-    cout<<"唤醒线程"<<tasks.size()<<endl;
     condition.notify_one(); // 唤醒一个线程执行任务
 }
 /*设置退出线程池*/
@@ -248,7 +247,7 @@ int main(){
     // ThreadPool tp(5,20);      // 设置线程上限
     // ThreadPool tp(5,100,20);  // 设置上限+每次递增递减线程数
     // 向线程池添加任务
-    for(int i=0;i<10;i++){
+    for(int i=0;i<1000;i++){
         Task task(i+1);
         tp.AddTask(task);
     }
